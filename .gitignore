@@ -1,0 +1,49 @@
+# === Frontend ===
+
+# dependencies
+/frontend/node_modules
+/frontend/.pnp
+/frontend.pnp.*
+/frontend.yarn/*
+!/frontend.yarn/patches
+!/frontend.yarn/plugins
+!/frontend.yarn/releases
+!/frontend.yarn/versions
+
+# testing
+/frontend/coverage
+
+# next.js
+/frontend/.next/
+/frontend/out/
+
+# production
+/frontend/build
+
+# misc
+/frontend/.DS_Store
+/frontend/*.pem
+
+# debug
+/frontend/npm-debug.log*
+/frontend/yarn-debug.log*
+/frontend/yarn-error.log*
+
+# env files (can opt-in for committing if needed)
+frontend/.env*
+
+# vercel
+/frontend.vercel
+
+# typescript
+/frontend/*.tsbuildinfo
+/frontend/next-env.d.ts
+
+# === Backend ===
+
+# Ignore node_modules in the backend
+/backend/node_modules/
+
+# Ignore .env files in backend
+/backend/.env*
+
