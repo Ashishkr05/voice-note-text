@@ -1,138 +1,124 @@
 require('dotenv').config();
 const express = require('express');
-const multer = require('multer');
-const fs = require('fs');
-const FormData = require('form-data');
-const axios = require('axios');
 const cors = require('cors');
-const path = require('path');
+const axios = require('axios');
+const busboy = require('busboy');
+const FormData = require('form-data');
 
-// Initialize Express app
 const app = express();
 
-// Validate environment variables
 if (!process.env.OPENAI_API_KEY) {
   console.error('OpenAI API key is missing in the environment variables.');
   process.exit(1);
 }
 
-// Configure CORS
 const corsOptions = {
-  origin: '*',
-  methods: ['POST', 'GET'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  origin: [
+    'http://localhost:3000',
+    process.env.FRONTEND_URL
+  ].filter(Boolean),
+  methods: ['POST', 'GET', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 };
 
-// Middleware
 app.use(cors(corsOptions));
-app.use(express.json());
 
-// Configure multer for file upload
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, 'uploads');
-    
-    // Create uploads directory if it doesn't exist
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+app.post('/transcribe', (req, res) => {
+  const bb = busboy({ 
+    headers: req.headers,
+    limits: {
+      fileSize: 25 * 1024 * 1024
     }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  }
-});
+  });
 
-// File filter for audio types
-const audioFileFilter = (req, file, cb) => {
-  const allowedMimeTypes = [
-    'audio/wav', 
-    'audio/mp3', 
-    'audio/mpeg', 
-    'audio/webm', 
-    'audio/ogg', 
-    'audio/x-m4a'
-  ];
+  bb.on('file', async (name, file, info) => {
+    // Allow both MP3 and WebM formats
+    const allowedMimeTypes = [
+      'audio/webm',
+      'audio/mp3',
+      'audio/mpeg',
+      'audio/mp4',
+      'audio/wav',
+      'audio/ogg'
+    ];
 
-  if (allowedMimeTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Unsupported file type. Please upload an audio file.'), false);
-  }
-};
-
-// Configure multer upload
-const upload = multer({
-  storage: storage,
-  fileFilter: audioFileFilter,
-  limits: { 
-    fileSize: 25 * 1024 * 1024 // 25MB max file size
-  }
-});
-
-// Transcription route
-app.post('/transcribe', upload.single('audio'), async (req, res) => {
-  try {
-    // Check if file was uploaded
-    if (!req.file) {
-      return res.status(400).json({ 
-        error: 'No audio file uploaded',
-        details: 'Please upload a valid audio file'
+    if (!allowedMimeTypes.includes(info.mimeType)) {
+      return res.status(400).json({
+        error: 'Invalid file type',
+        details: 'Please upload a valid audio file (MP3, WebM, WAV, OGG)',
+        success: false
       });
     }
 
-    // Create FormData to send to OpenAI
-    const formData = new FormData();
-    formData.append('file', fs.createReadStream(req.file.path));
-    formData.append('model', 'whisper-1');
+    try {
+      // Create FormData for OpenAI API
+      const formData = new FormData();
+      formData.append('file', file, {
+        filename: info.filename || 'audio.mp3',
+        contentType: info.mimeType
+      });
+      formData.append('model', 'whisper-1');
 
-    // Send transcription request
-    const transcriptionResponse = await axios.post(
-      'https://api.openai.com/v1/audio/transcriptions', 
-      formData, 
-      {
-        headers: {
-          ...formData.getHeaders(),
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
-        },
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity
-      }
-    );
+      // Send streaming request to OpenAI
+      const transcriptionResponse = await axios.post(
+        'https://api.openai.com/v1/audio/transcriptions',
+        formData,
+        {
+          headers: {
+            ...formData.getHeaders(),
+            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+          },
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity
+        }
+      );
 
-    // Delete the uploaded file after transcription
-    fs.unlinkSync(req.file.path);
+      // Return response matching frontend expectations
+      res.json({
+        text: transcriptionResponse.data.text,
+        success: true,
+        timestamp: new Date().toISOString()
+      });
 
-    // Send transcription result
-    res.json({ 
-      text: transcriptionResponse.data.text,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    // Clean up file if it exists
-    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (deleteError) {
-        console.error('Error deleting file:', deleteError);
-      }
+    } catch (error) {
+      console.error('Transcription Error:', error.response?.data || error.message);
+      
+      res.status(error.response?.status || 500).json({
+        error: 'Transcription failed',
+        details: error.response?.data?.error?.message || error.message,
+        success: false
+      });
     }
+  });
 
-    // Send detailed error response
-    console.error('Transcription Error:', error.response ? error.response.data : error.message);
+  bb.on('error', (error) => {
+    console.error('File upload error:', error);
     res.status(500).json({
-      error: 'Transcription failed',
-      details: error.response ? JSON.stringify(error.response.data) : error.message
+      error: 'File upload failed',
+      details: error.message,
+      success: false
     });
-  }
+  });
+
+  // Handle file size limit exceeded
+  bb.on('limit', () => {
+    res.status(413).json({
+      error: 'File too large',
+      details: 'Maximum file size is 25MB',
+      success: false
+    });
+  });
+
+  req.pipe(bb);
 });
 
 // Health check route
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
-    timestamp: new Date().toISOString() 
+    timestamp: new Date().toISOString(),
+    success: true
   });
 });
 
@@ -141,7 +127,8 @@ app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({
     error: 'Something went wrong',
-    details: err.message
+    details: err.message,
+    success: false
   });
 });
 

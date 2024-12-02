@@ -16,7 +16,7 @@ const VoiceRecorder = () => {
   const chunksRef = useRef<Blob[]>([]);
 
   // Get the API URL from environment variable
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://voice-note-text-backend.onrender.com';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
   const startRecording = async () => {
     try {
