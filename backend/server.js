@@ -13,10 +13,7 @@ if (!process.env.OPENAI_API_KEY) {
 }
 
 const corsOptions = {
-  origin: [
-    'http://localhost:3000',
-    process.env.FRONTEND_URL
-  ].filter(Boolean),
+  origin: '*',
   methods: ['POST', 'GET', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
